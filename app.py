@@ -123,6 +123,61 @@ def symptom_query(text):
     )
 
 
+# PROGRAMMATIC RELEVANCE FILTER (Programmatic Gatekeeping for Eyes / Visual Wellness Domain)
+GREETINGS = {"hi", "hello", "hey", "namaste", "hola", "greetings", "start", "restart", "help", "clear"}
+
+def is_query_relevant(text):
+    text = text.lower()
+    
+    # Split text into alphabetic words
+    words = re.findall(r"\b\w+\b", text)
+    
+    # Check if it contains any greeting
+    if any(w in GREETINGS for w in words):
+        return True
+        
+    # Whitelist of visual therapy, eyes, visual related terms, Nainocular, and synonyms (English & Hinglish)
+    RELEVANT_KEYWORDS = {
+        # Eyes / Anatomy
+        "eye", "eyes", "pupil", "iris", "retina", "cornea", "eyelid", "eyelids", "lash", "lashes",
+        "aankh", "aankhein", "ankh", "ankhein", "nayan", "netra", "ocular", "opthalmic", "ophthalmic",
+        
+        # Vision / Sight
+        "vision", "visual", "sight", "see", "look", "gaze", "gazing", "gazed", "dekh", "dekhna", "dekhne", "dikhta",
+        "blind", "blindness", "blur", "blurry", "blurred", "dhundhla", "dhundla", "nazar", "nazarein", "najar", "binai", "binaee",
+        
+        # Clinical Conditions
+        "myopia", "hyperopia", "astigmatism", "amblyopia", "strabismus", "glaucoma", "cataract", "cataracts",
+        "dryness", "dry", "strain", "fatigue", "squint", "lazy", "motiabind", "motia",
+        
+        # Symptoms / Sensations
+        "pain", "hurt", "hurts", "itching", "itch", "itchy", "burning", "burn", "redness", "red", "dard", "darad", "jalan", "khujli",
+        
+        # Treatment / Therapy
+        "therapy", "exercise", "exercises", "train", "training", "wellness", "care", "blink", "blinking",
+        
+        # Optical aids
+        "lens", "lenses", "glasses", "spectacles", "chashma", "chasma",
+        
+        # Nainocular Specifics
+        "nainocular", "naintaara", "naintaaraa", "nain-sukh", "nainsukh", "nain", "game", "games", "play", "playing", "article", "articles", "platform"
+    }
+    
+    for word in words:
+        if word in RELEVANT_KEYWORDS:
+            return True
+        for kw in RELEVANT_KEYWORDS:
+            if len(kw) > 3 and kw in word:
+                return True
+                
+    multi_word_keywords = ["dry eye", "dry eyes", "eye strain", "eye pain", "eye wellness", "visual therapy", "vision therapy", "screen time", "screen fatigue"]
+    for mw in multi_word_keywords:
+        if mw in text:
+            return True
+            
+    return False
+
+
 # SYSTEM PROMPT
 SYSTEM_PROMPT = """
 You are Nain-Sukh, an AI-powered Eye Wellness, Vision Care, and Nainocular Platform Assistant.
@@ -225,6 +280,10 @@ Please seek immediate care from an ophthalmologist or emergency department.
 This assistant cannot assess emergency conditions.
 """
 
+        elif not is_query_relevant(prompt):
+
+            reply = "👁️ I am Nain-Sukh, an Eye Wellness, Vision Care, and Nainocular Platform Assistant. Please ask a question related to eye health, vision care, eye conditions, or the Nainocular platform."
+
         else:
 
             # START ASSESSMENT
@@ -272,17 +331,45 @@ Knowledge Base Context:
                 st.session_state.messages
             )
 
+            # List of fallback free models on OpenRouter to iterate through if rate limits (429) occur
+            FREE_MODELS_FALLBACK = [
+                "openrouter/free",
+                "google/gemini-2.5-flash:free",
+                "meta-llama/llama-3.1-8b-instruct:free",
+                "google/gemma-2-9b-it:free",
+                "qwen/qwen-2.5-7b-instruct:free",
+                "qwen/qwen-2-7b-instruct:free",
+                "mistralai/mistral-7b-instruct:free",
+                "microsoft/phi-3-mini-128k-instruct:free",
+                "meta-llama/llama-3-8b-instruct:free",
+                "qwen/qwen3-next-8b-a3b-instruct:free",
+                "cognitivecomputations/dolphin-mistral-24b-venice-edition:free"
+            ]
+
             with st.spinner(
                 "Analyzing..."
             ):
+                models_to_try = [model] + [m for m in FREE_MODELS_FALLBACK if m != model]
+                response = None
+                last_error = None
 
-                response = (
-                    client.chat.completions.create(
-                        model=model,
-                        messages=messages,
-                        temperature=0.3
-                    )
-                )
+                for attempt_model in models_to_try:
+                    try:
+                        response = (
+                            client.chat.completions.create(
+                                model=attempt_model,
+                                messages=messages,
+                                temperature=0.3
+                            )
+                        )
+                        break
+                    except Exception as e:
+                        last_error = e
+                        print(f"Model {attempt_model} failed: {e}. Trying next fallback...")
+                        continue
+
+                if response is None:
+                    raise last_error
 
             reply = (
                 response
