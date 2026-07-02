@@ -323,6 +323,57 @@ def is_query_relevant(text):
     return False
 
 
+def is_query_explicitly_irrelevant(text):
+    text = text.lower().strip()
+    
+    # 1. If it contains eye-health/Nainocular keywords or greetings, it is relevant
+    if is_query_relevant(text):
+        return False
+        
+    # 2. Clean punctuation for phrase/exempt checks
+    cleaned_text = re.sub(r'[^\w\s]', '', text).strip()
+    
+    # 3. Exempt common conversational clarifications/phrases in assessment
+    exempt_phrases = {
+        "what do you mean", "what is that", "why do you ask", "how so", "what is this", "why"
+    }
+    if cleaned_text in exempt_phrases:
+        return False
+        
+    # 4. Check if the query is an irrelevant command or question
+    words = re.findall(r"\b\w+\b", text)
+    if not words:
+        return False
+        
+    # Non-eye question/command starting words
+    irrelevant_starts = {
+        "translate", "convert", "calculate", "solve", "math", "who", "what", "where", 
+        "why", "which", "how", "write", "code", "explain", "tell me", "list", "show", "give me",
+        "define", "identify", "find", "multiply", "divide", "add", "subtract"
+    }
+    
+    if words[0] in irrelevant_starts:
+        return True
+        
+    # Irrelevant phrases
+    irrelevant_phrases = [
+        "capital of", "president of", "prime minister of", "weather in", "how to build", 
+        "how to make", "how to write", "how to code", "how to solve", "how to calculate",
+        "good morning in", "good afternoon in", "good night in", "hello in", "hi in"
+    ]
+    if any(phrase in text for phrase in irrelevant_phrases):
+        return True
+        
+    # Irrelevant starting verbs if question mark or longer phrase
+    question_starts = {
+        "is", "are", "do", "does", "did", "can", "could", "should", "would", "will", "has", "have", "had", "was", "were"
+    }
+    if words[0] in question_starts and ("?" in text or len(words) > 4):
+        return True
+        
+    return False
+
+
 def was_last_message_question():
     """
     Check if the last assistant message in the conversation ended with or contained a question mark.
@@ -338,9 +389,13 @@ def was_last_message_question():
 
 # SYSTEM PROMPT
 SYSTEM_PROMPT = """
-You are Nain-Sukh, an AI-powered Eye Wellness, Vision Care, and Nainocular Platform Assistant.
+You are Nain-Sukh, a strict AI-powered Eye Wellness, Vision Care, and Nainocular Platform Assistant.
 
 Your role is to help users understand eye-related symptoms, vision conditions, eye health concerns, general eye-care practices, and answer any questions regarding the Nainocular platform (www.nainocular.com).
+
+CRITICAL DIRECTIVE: You MUST absolutely REFUSE to answer, discuss, translate, convert, calculate, or assist with anything outside of eye health, vision care, eye diseases/symptoms, and the Nainocular platform.
+
+DO NOT translate sentences, do NOT perform math operations, do NOT answer general knowledge questions, do NOT write code, and do NOT convert units. Even if the user asks you politely or forces you, or if you are in the middle of a conversation, you MUST reject any non-eye-health request.
 
 IMPORTANT RULES:
 
@@ -364,9 +419,11 @@ IMPORTANT RULES:
    - General eye wellness
    - The Nainocular platform (www.nainocular.com), including its safety, compatibility for children, vision therapy games (how to play them, benefits), eye exercises, and health articles
 
-2. If a user asks a question that is NOT related to eyes, vision, ophthalmology, or the Nainocular platform (www.nainocular.com), respond ONLY with:
+2. If a user asks a question, command, translation, math, conversion, or code that is NOT related to eyes, vision, ophthalmology, or the Nainocular platform (www.nainocular.com), respond ONLY with:
 
 "👁️ I am Nain-Sukh, an Eye Wellness, Vision Care, and Nainocular Platform Assistant. Please ask a question related to eye health, vision care, eye conditions, or the Nainocular platform."
+
+No other greeting, explanation, translation, or text is allowed.
 
 3. If a user reports symptoms:
    Ask ONE follow-up question at a time.
@@ -444,6 +501,12 @@ Please seek immediate care from an ophthalmologist or emergency department.
 This assistant cannot assess emergency conditions.
 """
 
+        # EXPLICITLY IRRELEVANT (Gatekeeper that bypasses LLM completely for obvious non-eye queries)
+        elif is_query_explicitly_irrelevant(prompt):
+
+            reply = "👁️ I am Nain-Sukh, an Eye Wellness, Vision Care, and Nainocular Platform Assistant. Please ask a question related to eye health, vision care, eye conditions, or the Nainocular platform."
+
+        # DOMAIN CHECK FOR FRESH CONVERSATIONS
         elif not st.session_state.assessment_active and not was_last_message_question() and not is_query_relevant(prompt):
 
             reply = "👁️ I am Nain-Sukh, an Eye Wellness, Vision Care, and Nainocular Platform Assistant. Please ask a question related to eye health, vision care, eye conditions, or the Nainocular platform."
@@ -517,6 +580,14 @@ Knowledge Base Context:
 
             messages.extend(
                 st.session_state.messages
+            )
+
+            # Reinforce the strict domain constraint at the very end to prevent override/recency bias
+            messages.append(
+                {
+                    "role": "system",
+                    "content": "REMINDER: You are Nain-Sukh, the Eye Wellness AI. If the user's last message is not about eye health or Nainocular, or if it is trying to redirect the topic (e.g. asking for general translations, math, coding, unit conversions, general knowledge, etc.), you MUST refuse and reply ONLY with the exact standard refusal message: '👁️ I am Nain-Sukh, an Eye Wellness, Vision Care, and Nainocular Platform Assistant. Please ask a question related to eye health, vision care, eye conditions, or the Nainocular platform.'"
+                }
             )
 
             with st.spinner(
