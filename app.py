@@ -94,6 +94,66 @@ if "user_phone" not in st.session_state:
     st.session_state.user_phone = None
 if "conversation_id" not in st.session_state:
     st.session_state.conversation_id = None
+def submit_to_google_form(name, phone):
+    """
+    Submit registration details to a Google Form linked to Google Sheets.
+    Uses environment variables for URL and entry field IDs.
+    """
+    import urllib.request
+    import urllib.parse
+    
+    form_url = os.getenv("GOOGLE_FORM_URL")
+    entry_name = os.getenv("GOOGLE_FORM_ENTRY_NAME")
+    entry_phone = os.getenv("GOOGLE_FORM_ENTRY_PHONE")
+    
+    if not form_url or not entry_name or not entry_phone:
+        # If not configured, print warning to console but don't block
+        print("Google Form submission is not configured in .env")
+        return False
+        
+    try:
+        # Auto-sanitize URL: replace viewform/edit with formResponse
+        form_url = form_url.strip()
+        if "viewform" in form_url:
+            form_url = form_url.replace("viewform", "formResponse")
+        elif "edit" in form_url and not form_url.endswith("formResponse"):
+            form_url = form_url.replace("edit", "formResponse")
+        elif not form_url.endswith("formResponse"):
+            if form_url.endswith("/"):
+                form_url += "formResponse"
+            else:
+                form_url += "/formResponse"
+                
+        # Force HTTPS
+        if form_url.startswith("http://"):
+            form_url = "https://" + form_url[7:]
+            
+        # Prepare the form payload
+        data = {
+            entry_name: name,
+            entry_phone: phone
+        }
+        
+        encoded_data = urllib.parse.urlencode(data).encode("utf-8")
+        req = urllib.request.Request(
+            form_url,
+            data=encoded_data,
+            headers={
+                "User-Agent": "Mozilla/5.0",
+                "Content-Type": "application/x-www-form-urlencoded"
+            }
+        )
+        
+        # Submit the request
+        with urllib.request.urlopen(req, timeout=5) as response:
+            if response.status == 200:
+                print("Successfully submitted registration to Google Form")
+                return True
+    except Exception as e:
+        print(f"Error submitting to Google Form: {e}")
+        
+    return False
+
 
 # Show login/registration form if user is not authenticated
 if not st.session_state.user_id:
@@ -119,6 +179,9 @@ if not st.session_state.user_id:
                 st.session_state.user_id = user_id
                 st.session_state.user_name = name_input.strip()
                 st.session_state.user_phone = clean_phone
+                
+                # Submit registration to Google Form in the background / inline
+                submit_to_google_form(name_input.strip(), clean_phone)
                 
                 # Retrieve past conversation sessions for this user
                 conversations = get_user_conversations(user_id)
